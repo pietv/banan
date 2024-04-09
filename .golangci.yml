@@ -1,0 +1,86 @@
+linters-settings:
+  godot:
+    scope: all
+    capital: true
+  nolintlint:
+    allow-unused: true
+    allow-leading-space: true
+    allow-no-explanation: []
+    require-explanation: true
+    require-specific: true
+  stylecheck:
+    checks: ["all", "-ST1005", "-ST1016"]
+  depguard:
+    rules:
+      main:
+        files:
+          - "!**/*_a _file.go"
+        deny:
+          - pkg: "github.com/stretchr/testify"
+            desc: use standard test library
+
+linters:
+  disable-all: true
+  fast: false
+  enable:
+    - misspell
+    - gosimple
+    - unparam
+    - typecheck
+    - unused
+    - govet
+    - gosec
+    - forbidigo
+    - gochecknoinits
+    - gocritic
+    - bodyclose
+    - goheader
+    - makezero
+    - nakedret
+    - importas
+    - unconvert
+    - promlinter
+    - goprintffuncname
+    - depguard
+    - dogsled
+    - exhaustive
+    - exportloopref
+    - whitespace
+    - nolintlint
+    - predeclared
+    - sqlclosecheck
+    - godot
+    - asciicheck
+    - durationcheck
+    - typecheck
+    - revive
+    - nilerr
+    - staticcheck
+    - ineffassign
+    - noctx
+    - stylecheck
+    - errcheck
+    - thelper
+    - tparallel
+    - asasalint
+    - tenv
+    - reassign
+    - errname
+    - dupword
+    - bidichk
+    - decorder
+    - grouper
+    - usestdlibvars
+    - nosprintfhostport
+    - nilnil
+    - contextcheck
+    - containedctx
+    - goimports
+
+
+severity:
+  default-severity: warning
+
+run:
+  skip-dirs:
+    - internal
