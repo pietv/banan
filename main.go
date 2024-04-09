@@ -29,7 +29,7 @@ func main() {
 	flaggy.DefaultParser.AdditionalHelpPrepend = "Usage: banan [FLAGS...] COMMAND"
 	flaggy.Duration(&timeout, "", "timeout", "Period after which the command is considered timed out")
 	flaggy.Duration(&remindEvery, "", "remind-every", "Remind that the command is still waiting to be executed")
-	flaggy.Duration(&queuedPickupAllowance, "", "queuedPickupAllowance", "Allow the previous queued command to start running before it is timed out")
+	flaggy.Duration(&queuedPickupAllowance, "", "--queued-pickup", "Allow the next queued command to start running if previous is slow to pick up")
 	flaggy.String(&remindBanner, "", "remind-banner", "Show this file instead of standard message.")
 	flaggy.String(&logdir, "", "log-dir", "Directory to create the log file in")
 	flaggy.StringSlice(&env, "e", "environment", "Set environment variables.")
@@ -70,7 +70,7 @@ func main() {
 		syscall.SIGHUP, syscall.SIGINT,
 		syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
-		// Handle incoming signal.
+		// Handle incoming signals.
 		<-ch
 		if b.Cmd == nil {
 			os.Exit(1)
@@ -90,4 +90,5 @@ func main() {
 	if err := b.Start(); err != nil {
 		log.Fatal(err)
 	}
+	os.Exit(b.ExitCode())
 }

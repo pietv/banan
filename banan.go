@@ -175,9 +175,10 @@ func WithRemindBanner(banner string) func(*Banan) {
 
 // Start starts the process of executing a command.
 // It either proceeds to executing it right away or
-// waits upon completion of its one or more of its
-// other instances; it consults the log to know about
-// them.
+// waits upon completion of one or more of its other
+// instances; it consults the log periodically
+// to be updated about the current status and if
+// it's our turn to execute the command.
 func (b *Banan) Start() error {
 	for err := b.GobbleUp(); err != nil; err = b.GobbleUp() {
 		switch {
@@ -206,6 +207,14 @@ func (b *Banan) Start() error {
 		}
 		return b.MarkDone(b.Cmd)
 	})
+}
+
+// ExitCode returns the exit code of the command that has been run or zero.
+func (b *Banan) ExitCode() int {
+	if b.Cmd != nil && b.Cmd.ProcessState != nil {
+		return b.Cmd.ProcessState.ExitCode()
+	}
+	return 0
 }
 
 // Wait puts everything to sleep until the next log check.

@@ -1,0 +1,25 @@
+# Binaries for programs and plugins
+*.log
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+node_modules
+
+# Project specific binaries and configs
+banan
+go.sum
+
+# Test binaries, build with `go test -c`
+*.test
+
+# Output of the go coverage, go trace, etc. tools
+*.out
+
+# Token file used for local testing
+token
+
+# Coverage analysis artifacts.
+coverage.txt
+coverage.html
