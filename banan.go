@@ -196,7 +196,7 @@ func (b *Banan) Start() error {
 	}
 
 	b.Cmd = exec.Command(b.Command, b.Args...) // #nosec G204
-	b.Cmd.Env = b.Env
+	b.Cmd.Env = append(os.Environ(), b.Env...)
 	errbuf := new(bytes.Buffer)
 	b.Cmd.Stdout = os.Stdout
 	b.Cmd.Stderr = io.MultiWriter(os.Stdout, errbuf)
