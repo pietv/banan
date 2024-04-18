@@ -26,7 +26,7 @@ var (
 )
 
 const (
-	timestamp = "2006-01-02 15:03:04 MST"
+	timestamp = "2006-01-02 15:04:05 MST"
 
 	defaultTimeout               = 30 * time.Minute
 	defaultRelevanceTimeout      = 8 * defaultTimeout
@@ -52,7 +52,7 @@ type Record struct {
 }
 
 func (rt *RecordTime) UnmarshalJSON(b []byte) error {
-	t, err := time.Parse(timestamp, strings.Trim(string(b), `"`))
+	t, err := time.ParseInLocation(timestamp, strings.Trim(string(b), `"`), time.UTC)
 	if err != nil {
 		return fmt.Errorf("RecordTime.UnmarshalJSON: %v", err)
 	}
@@ -286,15 +286,19 @@ func (b *Banan) GobbleUp() error {
 
 			switch rec.State {
 			case "Done":
+				log.Printf("   %q: %v", "Done", time.Time(rec.Time).Format(timestamp))
 				waitingPID, waitingDone = 0, rec.Time
 			case "Processing":
+				log.Printf("   %q: %v, timeout=%v", "Processing", time.Time(rec.Time).Format(timestamp), time.Duration(b.Timeout))
 				// Timed out?
 				if time.Since(time.Time(rec.Time)) < b.Timeout {
 					// No.
 					waitingPID = rec.PID
+					log.Printf("   ... not timed out")
 				} else {
 					// Yes.
 					waitingPID = 0
+					log.Printf("   ... timed out")
 				}
 
 				// Remove PID from the waiting queue.
@@ -306,6 +310,7 @@ func (b *Banan) GobbleUp() error {
 					}
 				}
 			case "Queued":
+				log.Printf("   %q: %v", "Queued", time.Time(rec.Time).Format(timestamp))
 				// Don't queue very old “Queued” records.
 				if time.Since(time.Time(rec.Time)) < b.RelevanceTimeout {
 					b.Queued[rec.PID] = struct{}{}
@@ -319,6 +324,7 @@ func (b *Banan) GobbleUp() error {
 
 		// Not waiting on anything and nothing's queued.
 		if waitingPID == 0 && len(b.Queue) == 0 {
+			log.Printf("   proceeding: queue is empty")
 			return b.MarkProcessing()
 		}
 
@@ -328,15 +334,18 @@ func (b *Banan) GobbleUp() error {
 
 			// My turn.
 			if top.PID == b.PID {
+				log.Printf("   proceeding: my turn")
 				return b.MarkProcessing()
 			}
 
 			// Not my turn, pickup time isn't expired. Keep waiting.
 			if time.Since(time.Time(waitingDone)) <= b.QueuedPickupAllowance {
+				log.Printf("   waiting: not my turn")
 				return ErrKeepWaiting
 			}
 
 			// Not my turn, pickup time is expired. Proceed.
+			log.Printf("   proceeding: someone's turn forfeited")
 			return b.MarkProcessing()
 		}
 
@@ -346,8 +355,10 @@ func (b *Banan) GobbleUp() error {
 			if err := b.MarkQueued(); err != nil {
 				return err
 			}
+			log.Printf("   waiting: joined the queue")
 			return ErrKeepWaiting
 		}
+		log.Printf("   waiting: still")
 		return ErrKeepWaiting
 	})
 }
