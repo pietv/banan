@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/pietv/banan/internal/lockedfile"
@@ -285,7 +286,7 @@ func (b *Banan) GobbleUp() error {
 			}
 
 			switch rec.State {
-			case "Done":
+			case "Done", "Killed":
 				log.Printf("   %q: %v", "Done", time.Time(rec.Time).Format(timestamp))
 				waitingPID, waitingDone = 0, rec.Time
 			case "Processing":
@@ -293,12 +294,12 @@ func (b *Banan) GobbleUp() error {
 				// Timed out?
 				if time.Since(time.Time(rec.Time)) < b.Timeout {
 					// No.
-					waitingPID = rec.PID
 					log.Printf("   ... not timed out")
+					waitingPID = rec.PID
 				} else {
 					// Yes.
-					waitingPID = 0
 					log.Printf("   ... timed out")
+					waitingPID = 0
 				}
 
 				// Remove PID from the waiting queue.
@@ -310,8 +311,8 @@ func (b *Banan) GobbleUp() error {
 					}
 				}
 			case "Queued":
-				log.Printf("   %q: %v", "Queued", time.Time(rec.Time).Format(timestamp))
 				// Don't queue very old “Queued” records.
+				log.Printf("   %q: %v", "Queued", time.Time(rec.Time).Format(timestamp))
 				if time.Since(time.Time(rec.Time)) < b.RelevanceTimeout {
 					b.Queued[rec.PID] = struct{}{}
 					heap.Push(&b.Queue, &Waiting{
@@ -320,6 +321,15 @@ func (b *Banan) GobbleUp() error {
 					})
 				}
 			}
+		}
+
+		// Check the process waited upon is still running.
+		if waitingPID != 0 && b.Killed(waitingPID) {
+			log.Printf("   process killed")
+			if err := b.MarkKilled(waitingPID); err != nil {
+				return err
+			}
+			waitingPID = 0
 		}
 
 		// Not waiting on anything and nothing's queued.
@@ -407,6 +417,26 @@ func (b *Banan) MarkDone(cmd *exec.Cmd, errs ...error) error {
 	return err
 }
 
+// MarkKilled logs the waited upon process is not running anymore.
+func (b *Banan) MarkKilled(pid int) error {
+	// Append to the end of the file.
+	if _, err := b.lockedlogfile.Seek(0, os.SEEK_END); err != nil { //nolint:staticcheck// this is not ‘os’ package
+		return err
+	}
+	log.Printf("   marking Killed: %v", pid)
+	rec := &Record{
+		Time:  RecordTime(time.Now().UTC()),
+		State: "Killed",
+		PID:   pid,
+
+		ExitCode:     -1,
+		ErrorMessage: fmt.Sprintf("%v", ErrProcessKilled),
+	}
+	err := json.NewEncoder(b.lockedlogfile).Encode(&rec)
+	log.Printf("   ... marked")
+	return err
+}
+
 // MarkProcessing marks in the log that the current global state
 // is running this command line binary.
 func (b *Banan) MarkProcessing() error {
@@ -431,4 +461,16 @@ func (b *Banan) MarkQueued() error {
 	})
 	log.Printf("   ... marked")
 	return err
+}
+
+// Killed checks if a running process is not running anymore.
+func (b *Banan) Killed(pid int) bool {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return true
+	}
+	if err := p.Signal(syscall.Signal(0)); err != nil {
+		return true
+	}
+	return false
 }
