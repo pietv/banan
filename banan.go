@@ -260,12 +260,19 @@ func (b *Banan) WithLock(fn func(b *Banan) error) error {
 
 	err = fn(b)
 
-	if errclose := f.Close(); errclose != nil {
+	b.lockedlogfile = nil
+
+	if err := f.Sync(); err != nil {
+		log.Printf("synching %v failed: %v", logfile, err)
+	} else {
+		log.Printf("synching %v", logfile)
+	}
+
+	if err := f.Close(); err != nil {
 		log.Printf("unlocking %v failed: %v", logfile, err)
 	} else {
 		log.Printf("unlocked %v", logfile)
 	}
-	b.lockedlogfile = nil
 
 	return err
 }
