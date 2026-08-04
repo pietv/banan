@@ -30,7 +30,6 @@ const (
 	timestamp = "2006-01-02 15:04:05 MST"
 
 	defaultTimeout               = 30 * time.Minute
-	defaultRelevanceTimeout      = 8 * defaultTimeout
 	defaultQueuedPickupAllowance = 15 * time.Second
 	defaultCheckEvery            = 1 * time.Second
 	defaultRemindEvery           = 5 * time.Second
@@ -46,16 +45,15 @@ type Record struct {
 	State string     `json:"state"`
 	PID   int        `json:"pid"`
 
-	ExitCode     int    `json:"exit_code,omitempty"`
-	ErrorMessage string `json:"error_message,omitempty"`
-	SystemTime   string `json:"system_time,omitempty"`
-	UserTime     string `json:"user_time,omitempty"`
+	ExitCode      int    `json:"exit_code,omitempty"`
+	ErrorMessage  string `json:"error_message,omitempty"`
+	WallClockTime string `json:"wall_clock_time,omitempty"`
 }
 
 func (rt *RecordTime) UnmarshalJSON(b []byte) error {
 	t, err := time.ParseInLocation(timestamp, strings.Trim(string(b), `"`), time.UTC)
 	if err != nil {
-		return fmt.Errorf("RecordTime.UnmarshalJSON: %v", err)
+		return fmt.Errorf("json.unmarshal.RecordTime: %v", err)
 	}
 	*rt = RecordTime(t)
 	return nil
@@ -64,7 +62,7 @@ func (rt *RecordTime) UnmarshalJSON(b []byte) error {
 func (rd *RecordDuration) UnmarshalJSON(b []byte) error {
 	duration, err := strconv.ParseUint(string(b), 10, 64)
 	if err != nil {
-		return fmt.Errorf("RecordDuration.UnmarshalJSON: %v", err)
+		return fmt.Errorf("json.unmarshal.RecordDuration: %v", err)
 	}
 	*rd = RecordDuration(duration)
 	return nil
@@ -74,22 +72,20 @@ func (rd *RecordDuration) MarshalJSON() (out []byte, _ error) { //nolint:unparam
 	return strconv.AppendInt(out, int64(*rd), 10), nil
 }
 
-func (rt *RecordTime) MarshalJSON() (out []byte, err error) {
+func (rt *RecordTime) MarshalJSON() (out []byte, _ error) {
 	out = make([]byte, 0, len(timestamp)+len(`""`))
 	out = append(out, '"')
 	out = time.Time(*rt).AppendFormat(out, timestamp)
 	out = append(out, '"')
-	if err != nil {
-		return nil, errors.New("RecordTime.MarshalJSON: " + err.Error())
-	}
-	return out, nil
+
+	return
 }
 
 type Banan struct {
 	PID          int
 	Command      string
-	Args         []string
-	Env          []string
+	CmdArgs      []string
+	CmdEnv       []string
 	RemindBanner string
 	LogDir       string
 	LogName      string
@@ -100,9 +96,10 @@ type Banan struct {
 	CheckEvery            time.Duration
 	RemindEvery           time.Duration
 
-	Queue  Queue
-	Queued map[int]struct{}
-	Cmd    *exec.Cmd
+	Queue   Queue
+	Queued  map[int]struct{}
+	Cmd     *exec.Cmd
+	Started time.Time
 
 	lockedlogfile *lockedfile.File
 }
@@ -132,15 +129,15 @@ func New(cmd string, options ...func(*Banan)) *Banan {
 	return banan
 }
 
-func WithArgs(args []string) func(*Banan) {
+func WithCmdArgs(args []string) func(*Banan) {
 	return func(b *Banan) {
-		b.Args = args
+		b.CmdArgs = args
 	}
 }
 
-func WithEnv(env []string) func(*Banan) {
+func WithCmdEnv(env []string) func(*Banan) {
 	return func(b *Banan) {
-		b.Env = env
+		b.CmdEnv = env
 	}
 }
 
@@ -179,7 +176,7 @@ func WithRemindBanner(banner string) func(*Banan) {
 // waits upon completion of one or more of its other
 // instances; it consults the log periodically
 // to be updated about the current status and if
-// it's our turn to execute the command.
+// it's “our” turn to execute the command.
 func (b *Banan) Start() error {
 	for err := b.GobbleUp(); err != nil; err = b.GobbleUp() {
 		switch {
@@ -196,11 +193,12 @@ func (b *Banan) Start() error {
 		}
 	}
 
-	b.Cmd = exec.Command(b.Command, b.Args...) // #nosec G204
-	b.Cmd.Env = append(os.Environ(), b.Env...)
+	b.Cmd = exec.Command(b.Command, b.CmdArgs...) // #nosec G204
+	b.Cmd.Env = append(os.Environ(), b.CmdEnv...)
 	errbuf := new(bytes.Buffer)
 	b.Cmd.Stdout = os.Stdout
 	b.Cmd.Stderr = io.MultiWriter(os.Stdout, errbuf)
+	b.Started = time.Now()
 	err := b.Cmd.Run()
 	return b.WithLock(func(b *Banan) error {
 		if err != nil {
@@ -263,9 +261,9 @@ func (b *Banan) WithLock(fn func(b *Banan) error) error {
 	b.lockedlogfile = nil
 
 	if err := f.Sync(); err != nil {
-		log.Printf("synching %v failed: %v", logfile, err)
+		log.Printf("syncing %v failed: %v", logfile, err)
 	} else {
-		log.Printf("synching %v", logfile)
+		log.Printf("syncing %v", logfile)
 	}
 
 	if err := f.Close(); err != nil {
@@ -390,7 +388,7 @@ func (b *Banan) RecordParse(text string) (rec Record, err error) {
 // MarkDone logs the completion of the executed command.
 func (b *Banan) MarkDone(cmd *exec.Cmd, errs ...error) error {
 	// Append to the end of the file.
-	if _, err := b.lockedlogfile.Seek(0, os.SEEK_END); err != nil { //nolint:staticcheck// this is not ‘os’ package
+	if _, err := b.lockedlogfile.Seek(0, io.SeekEnd); err != nil { //nolint:staticcheck// this is not ‘os’ package
 		return err
 	}
 
@@ -412,12 +410,9 @@ func (b *Banan) MarkDone(cmd *exec.Cmd, errs ...error) error {
 		State: "Done",
 		PID:   b.PID,
 
-		ExitCode:     exitcode,
-		ErrorMessage: message,
-	}
-	if cmd.ProcessState != nil {
-		rec.SystemTime = fmt.Sprintf("%v", cmd.ProcessState.SystemTime())
-		rec.UserTime = fmt.Sprintf("%v", cmd.ProcessState.UserTime())
+		ExitCode:      exitcode,
+		ErrorMessage:  message,
+		WallClockTime: fmt.Sprintf("%v", time.Since(b.Started)),
 	}
 	err := json.NewEncoder(b.lockedlogfile).Encode(&rec)
 	log.Printf("   ... marked")
@@ -427,7 +422,7 @@ func (b *Banan) MarkDone(cmd *exec.Cmd, errs ...error) error {
 // MarkKilled logs the waited upon process is not running anymore.
 func (b *Banan) MarkKilled(pid int) error {
 	// Append to the end of the file.
-	if _, err := b.lockedlogfile.Seek(0, os.SEEK_END); err != nil { //nolint:staticcheck// this is not ‘os’ package
+	if _, err := b.lockedlogfile.Seek(0, io.SeekEnd); err != nil { //nolint:staticcheck// this is not ‘os’ package
 		return err
 	}
 	log.Printf("   marking Killed: %v", pid)

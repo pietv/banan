@@ -10,6 +10,7 @@ $ go install github.com/pietv/banan@latest
 
 ## Execution
 
+
 **Banan** ([basque](https://translate.google.com/?sl=eu&tl=en&text=banan&op=translate):
 *"one by one"*, *"separately"*) executes the command
 right away or waits for another instance of that
@@ -22,13 +23,13 @@ The name of the log file is the name of the executable minus the file extension.
 When the log is written, it is locked using the operating system's file locking
 mechanisms.
 
-By default, the log file is created in the `$TMPDIR` directory; that can be overridden
+By default, the log file is created in the current directory; that can be overridden
 with the `--log-dir` flag.
 
 ```bash
-$ banan --log-dir=. -- bash -c echo running; sleep 2&
-$ banan --log-dir=. -- bash -c echo running; sleep 2&
-$ banan --log-dir=. -- bash -c echo running; sleep 2
+$ banan -- bash -c echo running; sleep 2&
+$ banan -- bash -c echo running; sleep 2&
+$ banan -- bash -c echo running; sleep 2
 ```
 
 ```bash
@@ -37,9 +38,9 @@ $ cat bash.log
 
 ```json
 {"time":"2024-04-09 12:12:56 UTC","state":"Processing","pid":45772}
-{"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45772,"system_time":"1.288ms","user_time":"702µs"}
+{"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45772,"wall_clock_time":"2.001288s"}
 {"time":"2024-04-09 12:12:56 UTC","state":"Processing","pid":45781}
-{"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45781,"system_time":"1.92ms","user_time":"1.119ms"}
+{"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45781,"wall_clock_time":"2.00192s"}
 {"time":"2024-04-09 12:12:56 UTC","state":"Processing","pid":45790}
-{"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45790,"system_time":"1.874ms","user_time":"997µs"}
+{"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45790,"wall_clock_time":"2.001874s"}
 ```
