@@ -44,3 +44,119 @@ $ cat bash.log
 {"time":"2024-04-09 12:12:56 UTC","state":"Processing","pid":45790}
 {"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45790,"wall_clock_time":"2.001874s"}
 ```
+
+A real life example of running an Android build on a ad-hoc builder server:
+
+```bash
+$ banan -e BUNDLE_ID=$BUNDLE_ID \
+        -e VERSION=$VERSION \
+        -e BUILD_NUMBER=$BUILD_NUMBER \
+        -e BUILDER_GITHUB_USER=$BUILDER_GITHUB_USER \
+        -e BUILDER_GITHUB_TOKEN=$BUILDER_GITHUB_TOKEN \
+        -e CIRCLE_BRANCH=$CIRCLE_BRANCH \
+        -e CIRCLE_COMMIT=$(git rev-parse HEAD) \
+        --remind-every=30s \
+        --remind-banner=queued-banner.txt \
+        --log-dir=. \
+        ./clone-and-build.sh
+```
+
+## State diagram
+
+`banan` records the states it goes through in a finite state machine
+(`fsm.New(...)`) with allowed states set in `New()` in `banan.go`.
+The `banan` test cases check against the allowed transitions.
+
+```mermaid
+stateDiagram-v2
+s0: Drop Record
+s1: Exit
+s2: Expire Processing
+s3: Find Alive
+s4: Find Done
+s5: Find Killed
+s6: Find Queue Empty
+s7: Join Queue
+s8: Keep Processing
+s9: Keep Waiting
+s10: Mark Done
+s11: Mark Killed
+s12: Mark Processing
+s13: Mark Queued
+s14: Queue Record
+s15: Read Log
+s16: Read Record
+s17: Run Command
+s18: Show Banner
+s19: Start
+s20: Take Turn
+s21: Wait
+s22: Yield Turn
+[*] --> s19
+s0 --> s15
+s0 --> s16
+s10 --> s1
+s11 --> s17
+s11 --> s20
+s11 --> s22
+s11 --> s6
+s12 --> s10
+s13 --> s18
+s13 --> s21
+s14 --> s15
+s14 --> s16
+s15 --> s17
+s15 --> s20
+s15 --> s22
+s15 --> s3
+s15 --> s5
+s15 --> s6
+s16 --> s0
+s16 --> s14
+s16 --> s15
+s16 --> s2
+s16 --> s4
+s16 --> s8
+s17 --> s12
+s18 --> s21
+s19 --> s15
+s19 --> s16
+s2 --> s15
+s2 --> s16
+s20 --> s12
+s21 --> s15
+s21 --> s16
+s22 --> s18
+s22 --> s21
+s3 --> s7
+s3 --> s9
+s4 --> s15
+s4 --> s16
+s5 --> s11
+s6 --> s12
+s7 --> s13
+s8 --> s15
+s8 --> s16
+s9 --> s18
+```
+
+The states meanings:
+
+* **Start**, **Wait**: a new pass over the log starts either at the very beginning
+  or after waiting for the next check.
+* **Read Record** and the states following it (**Find Done**, **Keep Processing**,
+  **Expire Processing**, **Queue Record**, **Drop Record**): the log is read record by
+  record; each record is classified. A *Processing* record that is older than the
+  timeout is expired, a *Queued* record older than the relevance period is dropped.
+* **Read Log**: the whole log has been read; time to decide.
+* **Find Killed**, **Find Alive**: the process being waited upon has been checked
+  and is found not running anymore (**Mark Killed**) or still running.
+* **Find Queue Empty**, **Run Command**, **Take Turn**: it is time to proceed
+  because nothing is waiting, because it is either this instance's turn, or because the
+  instance whose turn it was has not picked up in time (`--queued-pickup`).
+  **Mark Processing** records that and the command runs.
+* **Yield Turn**, **Keep Waiting**, **Join Queue**: it is still not this instance's
+  turn; **Join Queue** and **Mark Queued** let others know it is waiting.
+* **Show Banner**: remind that the command is still waiting.
+* **Mark Done**, **Exit**: the command has completed and its exit
+  status is recorded.

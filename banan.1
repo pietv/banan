@@ -1,0 +1,239 @@
+.Dd October 18, 2026
+.Dt BANAN 1
+.Os
+.Sh NAME
+.Nm banan
+.Nd a simple queued job runner
+.Pp
+.Po
+.Nm banan
+means
+.Do one by one Dc in Basque.
+.Sh SYNOPSIS
+.Nm
+.Op Fl d | Fl -debug
+.Op Fl -timeout Ar duration
+.Op Fl -queued-pickup Ar duration
+.Op Fl -remind-every Ar duration
+.Op Fl -remind-banner Ar file
+.Op Fl -log-dir Ar directory
+.Op Fl e | Fl -environment Ar NAME=value
+.Fl -
+.Ar command
+.Op Ar argument ...
+.Nm
+.Fl h | Fl -help
+.Nm
+.Fl -man
+.Sh DESCRIPTION
+The
+.Nm
+utility executes a
+.Ar command
+right away or, if another instance of that command is already being run
+using
+.Nm ,
+waits for it to complete first, so that commands are executed one by one.
+.Pp
+The command is identified by the name of its executable:
+for the command line
+.Dq bash -c "echo 123"
+the identification name is
+.Dq bash .
+.Pp
+Instances of
+.Nm
+coordinate with each other through a log file named after the identification
+name with the file extension removed, with the
+.Pa .log
+suffix added:
+.Pa bash.log
+for
+.Pa bash ,
+.Pa script.log
+for
+.Pa script.sh .
+The log is locked using the operating system's file locking mechanisms while
+it is being read or written.
+.Pp
+Everything following the
+.Fl -
+argument is the command line to execute.
+The command and each of its arguments are separate words, as with
+.Xr env 1
+or
+.Xr nice 1 :
+a quoted command line such as
+.Dq "echo a b c"
+is taken to be the name of a single executable, and is not found.
+The standard output of the command is passed through unchanged.
+The standard error of the command is written to the standard output as well,
+and is also saved in the log if the command fails.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl d , Fl -debug
+Show debugging output, on the standard error: locking and
+unlocking of the log file, the records read from it, and the decisions
+taken because of them.
+.It Fl e , Fl -environment Ar NAME=value
+Set an environment variable for the command, in addition to the environment
+.Nm
+itself has been run with.
+May be given multiple times.
+.It Fl -log-dir Ar directory
+Create the log file in the
+.Ar directory .
+The default is the current directory.
+.It Fl h , Fl -help
+Show the usage message.
+.It Fl -man
+Show this manual page, or, if neither the
+.Xr mandoc 1
+nor the
+.Xr man 1
+utility is available, the usage message.
+.It Fl -queued-pickup Ar duration
+Allow the next queued command to start running if the previously queued command
+is slow to pick up its turn, that is if this much time has passed
+since the previous command completed and the queued command has not started yet.
+The default is
+.Li 15s .
+.It Fl -remind-banner Ar file
+Show the contents of the
+.Ar file
+instead of the standard message while waiting.
+The file is a Go
+.Lk https://pkg.go.dev/html/template html/template
+template that is executed against the running instance, so
+.Li {{.Command}}
+and
+.Li {{.PID}}
+are the command being waited for and the process identification
+number of this instance.
+.It Fl -remind-every Ar duration
+Remind that the command is still waiting to be executed, by showing the
+banner, this often.
+The reminder is shown when the number of seconds since the Unix epoch is a multiple
+of the whole number of seconds in the
+.Ar duration ,
+so anything shorter than a second is taken to be a second.
+The default is
+.Li 5s .
+.It Fl -timeout Ar duration
+Period after which a command that has been started and has not completed is
+considered timed out: other instances stop waiting for it.
+The default is
+.Li 30m .
+.El
+.Pp
+A
+.Ar duration
+is a sequence of decimal numbers with unit suffixes, as accepted by the Go
+.Fn time.ParseDuration
+function, for example
+.Li 300ms ,
+.Li 1.5h
+or
+.Li 2h45m .
+.Sh LOG FORMAT
+The log is a file of JSON objects, one per line, appended in the order the
+events have happened:
+.Bd -literal -offset indent
+{"time":"2024-04-09 12:12:56 UTC","state":"Processing","pid":45772}
+{"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45772,"wall_clock_time":"2.001288s"}
+.Ed
+.Pp
+The
+.Dq state
+field is one of:
+.Bl -tag -width Ds -compact
+.It Sy Processing
+the instance has started running its command.
+.It Sy Queued
+the instance is waiting for another instance's command to complete.
+.It Sy Done
+the command has completed.
+The record also has the
+.Dq exit_code ,
+the
+.Dq wall_clock_time ,
+and, if the command failed, the
+.Dq error_message
+fields.
+.It Sy Killed
+an instance that had been waited upon has been found not running anymore
+without having recorded the completion.
+.El
+.Pp
+Instances are served in the order they have joined the queue.
+A
+.Sy Queued
+record older than four hours is disregarded.
+.Sh SIGNALS
+Upon receiving
+.Dv SIGHUP ,
+.Dv SIGINT ,
+.Dv SIGQUIT ,
+or
+.Dv SIGTERM ,
+.Nm
+kills the command it is running, records it as
+.Sy Done ,
+and exits with the exit status 1.
+.Sh ENVIRONMENT
+The command inherits the environment of
+.Nm .
+Additional variables can be set with the
+.Fl e
+option.
+.Sh FILES
+.Bl -tag -width Ds -compact
+.It Pa ./ Ns Ar name Ns Pa .log
+the log file, where
+.Ar name
+is the name of the command's executable without the extension.
+.El
+.Sh EXIT STATUS
+.Nm
+exits with the exit status of the command that has been run.
+If the command could not be started, an error message is printed to the standard error
+and the exit status is 127 if the command was not found, and 126 if it was found but
+could not be executed, same as in a shell.
+If the log cannot be read or written, or on a usage error, it exits with a
+non-zero status.
+.Pp
+The
+.Fl -man
+option exits with 0, or with 2 if it has shown the usage message instead
+of the manual page.
+.Sh EXAMPLES
+Run three instances of a command at the same time; they are executed
+one after another:
+.Bd -literal -offset indent
+$ banan -- bash -c 'echo running; sleep 2' &
+$ banan -- bash -c 'echo running; sleep 2' &
+$ banan -- bash -c 'echo running; sleep 2'
+.Ed
+.Pp
+Show the log afterwards:
+.Bd -literal -offset indent
+$ cat bash.log
+.Ed
+.Pp
+Keep the log in a dedicated directory, consider the command timed out
+after ten minutes, and let the next in line start if the previous
+one is slow to pick up for more than five seconds:
+.Bd -literal -offset indent
+$ banan --log-dir /var/tmp --timeout 10m --queued-pickup 5s -- make deploy
+.Ed
+.Pp
+Set an environment variable for the command:
+.Bd -literal -offset indent
+$ banan -e GOFLAGS=-count=2 -- go test ./...
+.Ed
+.Sh SEE ALSO
+.Xr flock 1 ,
+.Xr lockf 1
+.Sh AUTHORS
+.An Peter Vypov <peter.vypov@gmail.com>

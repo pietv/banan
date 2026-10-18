@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 
 	"github.com/integrii/flaggy"
@@ -20,6 +22,7 @@ func main() {
 		logdir = "."
 		env    []string
 		debug  bool
+		man    bool
 	)
 
 	flaggy.SetName("Banan")
@@ -34,8 +37,25 @@ func main() {
 	flaggy.String(&logdir, "", "log-dir", "Directory to create the log file in")
 	flaggy.StringSlice(&env, "e", "environment", "Set environment variables.")
 	flaggy.Bool(&debug, "d", "debug", "Debug operation")
+	flaggy.Bool(&man, "", "man", "Show the manual page")
+
+	// Undocumented: print the state diagram and exit.
+	if slices.Contains(os.Args[1:], "--mermaid") {
+		if err := New("banan").Mermaid(os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "banan: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 
 	flaggy.Parse()
+
+	if man {
+		if err := ShowMan(); err != nil {
+			flaggy.ShowHelpAndExit("")
+		}
+		os.Exit(0)
+	}
 
 	if len(flaggy.TrailingArguments) == 0 {
 		flaggy.ShowHelpAndExit("You must specify a command to run")
@@ -88,7 +108,11 @@ func main() {
 		os.Exit(1)
 	}()
 	if err := b.Start(); err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "banan: %v\n", err)
+		os.Exit(1)
+	}
+	if b.startErr != nil {
+		fmt.Fprintf(os.Stderr, "banan: %v\n", b.startErr)
 	}
 	os.Exit(b.ExitCode())
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pietv/banan/fsm"
 	"github.com/pietv/banan/internal/lockedfile"
 )
 
@@ -102,6 +104,11 @@ type Banan struct {
 	Started time.Time
 
 	lockedlogfile *lockedfile.File
+
+	// startErr is set if the command could not be started at all
+	// (not found, not executable), as opposed to running and failing.
+	startErr error
+	state    *fsm.State
 }
 
 func New(cmd string, options ...func(*Banan)) *Banan {
@@ -122,6 +129,61 @@ func New(cmd string, options ...func(*Banan)) *Banan {
 
 		Queue:  make([]*Waiting, 0),
 		Queued: make(map[int]struct{}),
+
+		state: fsm.New("Start",
+			// Reading the log record by record, either for
+			// the first time or after waiting.
+			"Start", "Read Record",
+			"Start", "Read Log",
+			"Wait", "Read Record",
+			"Wait", "Read Log",
+			"Read Record", "Read Log",
+			"Read Record", "Find Done",
+			"Read Record", "Keep Processing",
+			"Read Record", "Expire Processing",
+			"Read Record", "Queue Record",
+			"Read Record", "Drop Record",
+			"Find Done", "Read Record",
+			"Find Done", "Read Log",
+			"Keep Processing", "Read Record",
+			"Keep Processing", "Read Log",
+			"Expire Processing", "Read Record",
+			"Expire Processing", "Read Log",
+			"Queue Record", "Read Record",
+			"Queue Record", "Read Log",
+			"Drop Record", "Read Record",
+			"Drop Record", "Read Log",
+
+			// Deciding whether to proceed or keep waiting.
+			"Read Log", "Find Killed",
+			"Read Log", "Find Alive",
+			"Read Log", "Find Queue Empty",
+			"Read Log", "Run Command",
+			"Read Log", "Yield Turn",
+			"Read Log", "Take Turn",
+			"Find Killed", "Mark Killed",
+			"Mark Killed", "Find Queue Empty",
+			"Mark Killed", "Run Command",
+			"Mark Killed", "Yield Turn",
+			"Mark Killed", "Take Turn",
+			"Find Alive", "Join Queue",
+			"Find Alive", "Keep Waiting",
+			"Find Queue Empty", "Mark Processing",
+			"Run Command", "Mark Processing",
+			"Take Turn", "Mark Processing",
+			"Join Queue", "Mark Queued",
+
+			// Waiting, running the command, exiting.
+			"Mark Queued", "Show Banner",
+			"Mark Queued", "Wait",
+			"Yield Turn", "Show Banner",
+			"Yield Turn", "Wait",
+			"Keep Waiting", "Show Banner",
+			"Keep Waiting", "Wait",
+			"Show Banner", "Wait",
+			"Mark Processing", "Mark Done",
+			"Mark Done", "Exit",
+		),
 	}
 	for _, o := range options {
 		o(banan)
@@ -159,9 +221,12 @@ func WithLogDir(logdir string) func(*Banan) {
 	}
 }
 
+// WithRemindEvery sets how often to remind about waiting. Anything
+// shorter than a second is set to a second: the reminder is scheduled
+// by whole seconds of the Unix time.
 func WithRemindEvery(every time.Duration) func(*Banan) {
 	return func(b *Banan) {
-		b.RemindEvery = every
+		b.RemindEvery = max(every, time.Second)
 	}
 }
 
@@ -183,13 +248,13 @@ func (b *Banan) Start() error {
 		case errors.Is(err, ErrKeepWaiting):
 			// Show banner.
 			if err := b.ShowWaitingBanner(); err != nil {
-				return fmt.Errorf("banan.Start: banner %v", err)
+				return fmt.Errorf("banner: %w", err)
 			}
 
 			// Wait it out.
 			b.Wait()
 		default:
-			return fmt.Errorf("banan.Start: %v", err)
+			return err
 		}
 	}
 
@@ -200,6 +265,9 @@ func (b *Banan) Start() error {
 	b.Cmd.Stderr = io.MultiWriter(os.Stdout, errbuf)
 	b.Started = time.Now()
 	err := b.Cmd.Run()
+	if err != nil && b.Cmd.ProcessState == nil {
+		b.startErr = err
+	}
 	return b.WithLock(func(b *Banan) error {
 		if err != nil {
 			return b.MarkDone(b.Cmd, err, fmt.Errorf("%v", errbuf.String()))
@@ -209,17 +277,24 @@ func (b *Banan) Start() error {
 }
 
 // ExitCode returns the exit code of the command that has been run or zero.
+// If the command could not be started, it is 127 if the command was not
+// found and 126 otherwise, same as in a shell.
 func (b *Banan) ExitCode() int {
-	if b.Cmd != nil && b.Cmd.ProcessState != nil {
+	b.state.To("Exit")
+	switch {
+	case b.startErr != nil:
+		if errors.Is(b.startErr, exec.ErrNotFound) || errors.Is(b.startErr, fs.ErrNotExist) {
+			return 127
+		}
+		return 126
+	case b.Cmd != nil && b.Cmd.ProcessState != nil:
 		return b.Cmd.ProcessState.ExitCode()
 	}
 	return 0
 }
 
 // Wait puts everything to sleep until the next log check.
-func (b *Banan) Wait() {
-	time.Sleep(b.CheckEvery)
-}
+func (b *Banan) Wait() { b.state.To("Wait"); time.Sleep(b.CheckEvery) }
 
 // ShowWaitingBanner displays a waiting banner reminding the user
 // that the command still cannot be executed or the
@@ -241,6 +316,7 @@ Waiting on a running command to complete.
 			return err
 		}
 	}
+	b.state.To("Show Banner")
 	return template.Must(template.New("banner").Parse(string(banner))).Execute(os.Stdout, b)
 }
 
@@ -284,7 +360,13 @@ func (b *Banan) GobbleUp() error {
 			waitingDone RecordTime
 		)
 
+		// The whole log is read anew every time, so start
+		// with an empty queue rather than piling up duplicates.
+		b.Queue = b.Queue[:0]
+		clear(b.Queued)
+
 		for scanner.Scan() {
+			b.state.To("Read Record")
 			rec, err := b.RecordParse(scanner.Text())
 			if scanner.Err() != nil || err != nil {
 				return err
@@ -293,16 +375,19 @@ func (b *Banan) GobbleUp() error {
 			switch rec.State {
 			case "Done", "Killed":
 				log.Printf("   %q: %v", "Done", time.Time(rec.Time).Format(timestamp))
+				b.state.To("Find Done")
 				waitingPID, waitingDone = 0, rec.Time
 			case "Processing":
 				log.Printf("   %q: %v, timeout=%v", "Processing", time.Time(rec.Time).Format(timestamp), time.Duration(b.Timeout))
 				// Timed out?
 				if time.Since(time.Time(rec.Time)) < b.Timeout {
 					// No.
+					b.state.To("Keep Processing")
 					log.Printf("   ... not timed out")
 					waitingPID = rec.PID
 				} else {
 					// Yes.
+					b.state.To("Expire Processing")
 					log.Printf("   ... timed out")
 					waitingPID = 0
 				}
@@ -319,14 +404,18 @@ func (b *Banan) GobbleUp() error {
 				// Don't queue very old “Queued” records.
 				log.Printf("   %q: %v", "Queued", time.Time(rec.Time).Format(timestamp))
 				if time.Since(time.Time(rec.Time)) < b.RelevanceTimeout {
+					b.state.To("Queue Record")
 					b.Queued[rec.PID] = struct{}{}
 					heap.Push(&b.Queue, &Waiting{
 						PID:      rec.PID,
 						Inserted: rec.Time,
 					})
+				} else {
+					b.state.To("Drop Record")
 				}
 			}
 		}
+		b.state.To("Read Log")
 
 		// Check the process waited upon is still running.
 		if waitingPID != 0 && b.Killed(waitingPID) {
@@ -339,6 +428,7 @@ func (b *Banan) GobbleUp() error {
 
 		// Not waiting on anything and nothing's queued.
 		if waitingPID == 0 && len(b.Queue) == 0 {
+			b.state.To("Find Queue Empty")
 			log.Printf("   proceeding: queue is empty")
 			return b.MarkProcessing()
 		}
@@ -349,17 +439,20 @@ func (b *Banan) GobbleUp() error {
 
 			// My turn.
 			if top.PID == b.PID {
+				b.state.To("Run Command")
 				log.Printf("   proceeding: my turn")
 				return b.MarkProcessing()
 			}
 
 			// Not my turn, pickup time isn't expired. Keep waiting.
 			if time.Since(time.Time(waitingDone)) <= b.QueuedPickupAllowance {
+				b.state.To("Yield Turn")
 				log.Printf("   waiting: not my turn")
 				return ErrKeepWaiting
 			}
 
 			// Not my turn, pickup time is expired. Proceed.
+			b.state.To("Take Turn")
 			log.Printf("   proceeding: someone's turn forfeited")
 			return b.MarkProcessing()
 		}
@@ -367,12 +460,14 @@ func (b *Banan) GobbleUp() error {
 		// Waiting on a job completion.
 		if _, ok := b.Queued[b.PID]; !ok {
 			// Let others know I'm waiting in the queue too. Keep waiting.
+			b.state.To("Join Queue")
 			if err := b.MarkQueued(); err != nil {
 				return err
 			}
 			log.Printf("   waiting: joined the queue")
 			return ErrKeepWaiting
 		}
+		b.state.To("Keep Waiting")
 		log.Printf("   waiting: still")
 		return ErrKeepWaiting
 	})
@@ -404,6 +499,7 @@ func (b *Banan) MarkDone(cmd *exec.Cmd, errs ...error) error {
 	default:
 	}
 
+	b.state.To("Mark Done")
 	log.Printf("   marking Done: %v", b.PID)
 	rec := &Record{
 		Time:  RecordTime(time.Now().UTC()),
@@ -425,6 +521,8 @@ func (b *Banan) MarkKilled(pid int) error {
 	if _, err := b.lockedlogfile.Seek(0, io.SeekEnd); err != nil { //nolint:staticcheck// this is not ‘os’ package
 		return err
 	}
+
+	b.state.To("Mark Killed")
 	log.Printf("   marking Killed: %v", pid)
 	rec := &Record{
 		Time:  RecordTime(time.Now().UTC()),
@@ -442,6 +540,7 @@ func (b *Banan) MarkKilled(pid int) error {
 // MarkProcessing marks in the log that the current global state
 // is running this command line binary.
 func (b *Banan) MarkProcessing() error {
+	b.state.To("Mark Processing")
 	log.Printf("   marking Processing: %v", b.PID)
 	err := json.NewEncoder(b.lockedlogfile).Encode(&Record{
 		Time:  RecordTime(time.Now().UTC()),
@@ -455,6 +554,7 @@ func (b *Banan) MarkProcessing() error {
 // MarkQueued marks in the log that the current global state
 // is waiting upon completion of the previous command.
 func (b *Banan) MarkQueued() error {
+	b.state.To("Mark Queued")
 	log.Printf("   marking Queued: %v", b.PID)
 	err := json.NewEncoder(b.lockedlogfile).Encode(&Record{
 		Time:  RecordTime(time.Now().UTC()),
@@ -469,10 +569,13 @@ func (b *Banan) MarkQueued() error {
 func (b *Banan) Killed(pid int) bool {
 	p, err := os.FindProcess(pid)
 	if err != nil {
+		b.state.To("Find Killed")
 		return true
 	}
 	if err := p.Signal(syscall.Signal(0)); err != nil {
+		b.state.To("Find Killed")
 		return true
 	}
+	b.state.To("Find Alive")
 	return false
 }
