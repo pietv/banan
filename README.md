@@ -10,7 +10,6 @@ $ go install github.com/pietv/banan@latest
 
 ## Execution
 
-
 **Banan** ([basque](https://translate.google.com/?sl=eu&tl=en&text=banan&op=translate):
 *"one by one"*, *"separately"*) executes the command
 right away or waits for another instance of that
@@ -44,6 +43,25 @@ $ cat bash.log
 {"time":"2024-04-09 12:12:56 UTC","state":"Processing","pid":45790}
 {"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45790,"wall_clock_time":"2.001874s"}
 ```
+
+```bash
+Banan - a simple job queuer
+Usage: banan [FLAGS...] COMMAND
+
+  Flags:
+       --version         Displays the program version string.
+    -h --help            Displays help with available flag, subcommand, and positional value parameters.
+       --timeout         Period after which the command is considered timed out (default: 30m0s)
+       --remind-every    Remind that the command is still waiting to be executed (default: 5s)
+       --queued-pickup   Allow the next queued command to start running if previous is slow to pick up (default: 15s)
+       --remind-banner   Show this file instead of standard message.
+       --log-dir         Directory to create the log file in (default: .)
+    -e --environment     Set environment variables.
+    -d --debug           Debug operation
+       --man             Show the manual page
+```
+
+## Example
 
 A real life example of running an Android build on a ad-hoc builder server:
 
