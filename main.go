@@ -90,22 +90,12 @@ func main() {
 		syscall.SIGHUP, syscall.SIGINT,
 		syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
-		// Handle incoming signals.
-		<-ch
-		if b.Cmd == nil {
-			os.Exit(1)
+		// Forward signals to the child process.
+		for sig := range ch {
+			if b.Cmd != nil && b.Cmd.Process != nil {
+				_ = b.Cmd.Process.Signal(sig)
+			}
 		}
-
-		p, err := os.FindProcess(b.Cmd.Process.Pid)
-		if err != nil {
-			os.Exit(1)
-		}
-
-		_ = p.Kill()
-		_ = b.WithLock(func(b *Banan) error {
-			return b.MarkDone(b.Cmd, ErrProcessKilled)
-		})
-		os.Exit(1)
 	}()
 	if err := b.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "banan: %v\n", err)

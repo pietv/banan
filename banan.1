@@ -85,14 +85,6 @@ May be given multiple times.
 Create the log file in the
 .Ar directory .
 The default is the current directory.
-.It Fl h , Fl -help
-Show the usage message.
-.It Fl -man
-Show this manual page, or, if neither the
-.Xr mandoc 1
-nor the
-.Xr man 1
-utility is available, the usage message.
 .It Fl -queued-pickup Ar duration
 Allow the next queued command to start running if the previously queued command
 is slow to pick up its turn, that is if this much time has passed
@@ -125,17 +117,16 @@ Period after which a command that has been started and has not completed is
 considered timed out: other instances stop waiting for it.
 The default is
 .Li 30m .
+.It Fl h , Fl -help
+Show the usage message.
+.It Fl -man
+Show this manual page, or, if neither the
+.Xr mandoc 1
+nor the
+.Xr man 1
+utility is available, the usage message.
 .El
 .Pp
-A
-.Ar duration
-is a sequence of decimal numbers with unit suffixes, as accepted by the Go
-.Fn time.ParseDuration
-function, for example
-.Li 300ms ,
-.Li 1.5h
-or
-.Li 2h45m .
 .Sh LOG FORMAT
 The log is a file of JSON objects, one per line, appended in the order the
 events have happened:

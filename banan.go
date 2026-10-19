@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -32,15 +31,13 @@ const (
 	timestamp = "2006-01-02 15:04:05 MST"
 
 	defaultTimeout               = 30 * time.Minute
+	defaultRelevanceTimeout      = 4 * time.Hour
 	defaultQueuedPickupAllowance = 15 * time.Second
 	defaultCheckEvery            = 1 * time.Second
 	defaultRemindEvery           = 5 * time.Second
 )
 
-type (
-	RecordTime     time.Time
-	RecordDuration time.Duration
-)
+type RecordTime time.Time
 
 type Record struct {
 	Time  RecordTime `json:"time"`
@@ -59,19 +56,6 @@ func (rt *RecordTime) UnmarshalJSON(b []byte) error {
 	}
 	*rt = RecordTime(t)
 	return nil
-}
-
-func (rd *RecordDuration) UnmarshalJSON(b []byte) error {
-	duration, err := strconv.ParseUint(string(b), 10, 64)
-	if err != nil {
-		return fmt.Errorf("json.unmarshal.RecordDuration: %v", err)
-	}
-	*rd = RecordDuration(duration)
-	return nil
-}
-
-func (rd *RecordDuration) MarshalJSON() (out []byte, _ error) { //nolint:unparam// yes, the error is always ‘nil’.
-	return strconv.AppendInt(out, int64(*rd), 10), nil
 }
 
 func (rt *RecordTime) MarshalJSON() (out []byte, _ error) {
@@ -120,7 +104,7 @@ func New(cmd string, options ...func(*Banan)) *Banan {
 		Command:               cmd,
 		PID:                   os.Getpid(),
 		Timeout:               defaultTimeout,
-		RelevanceTimeout:      8 * defaultTimeout,
+		RelevanceTimeout:      defaultRelevanceTimeout,
 		QueuedPickupAllowance: defaultQueuedPickupAllowance,
 		RemindEvery:           defaultRemindEvery,
 		CheckEvery:            defaultCheckEvery,
@@ -268,19 +252,20 @@ func (b *Banan) Start() error {
 	if err != nil && b.Cmd.ProcessState == nil {
 		b.startErr = err
 	}
-	return b.WithLock(func(b *Banan) error {
+	lockerr := b.WithLock(func(b *Banan) error {
 		if err != nil {
 			return b.MarkDone(b.Cmd, err, fmt.Errorf("%v", errbuf.String()))
 		}
 		return b.MarkDone(b.Cmd)
 	})
+	b.state.To("Exit")
+	return lockerr
 }
 
 // ExitCode returns the exit code of the command that has been run or zero.
 // If the command could not be started, it is 127 if the command was not
 // found and 126 otherwise, same as in a shell.
 func (b *Banan) ExitCode() int {
-	b.state.To("Exit")
 	switch {
 	case b.startErr != nil:
 		if errors.Is(b.startErr, exec.ErrNotFound) || errors.Is(b.startErr, fs.ErrNotExist) {
