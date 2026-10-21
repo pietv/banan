@@ -1,5 +1,7 @@
 # Banan: a simple queued job runner
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/pietv/banan.svg)](https://pkg.go.dev/github.com/pietv/banan)
+
 ## Install
 
 Requires Go version ≥ `1.21.7`.
