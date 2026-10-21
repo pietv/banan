@@ -493,7 +493,7 @@ func (b *Banan) MarkDone(cmd *exec.Cmd, errs ...error) error {
 
 		ExitCode:      exitcode,
 		ErrorMessage:  message,
-		WallClockTime: fmt.Sprintf("%v", time.Since(b.Started)),
+		WallClockTime: fmt.Sprintf("%.2fs", time.Since(b.Started).Seconds()),
 	}
 	err := json.NewEncoder(b.lockedlogfile).Encode(&rec)
 	log.Printf("   ... marked")
