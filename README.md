@@ -2,6 +2,19 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/pietv/banan.svg)](https://pkg.go.dev/github.com/pietv/banan)
 
+**Banan** ([basque](https://translate.google.com/?sl=eu&tl=en&text=banan&op=translate): *"one by one"*, *"separately"*)
+is a simple job queuer that runs a given shell command strictly in
+sequence, one instance at a time. A command is identified by the name of its
+binary (arguments are ignored), so all runs of the same-named command
+run through this tool are serialized through a shared log file. Different
+commands with same name may be used simultaneously if `banan` is invoked
+with a different `--log-dir` directory.
+
+It was originally written to queue build jobs arriving at a build server
+over SSH at random times. Each job cloned a GitHub repository,
+pulled upstream dependencies, and ran configuration tweaks: a sequence
+that is unsuitable to be run in parallel.
+
 ## Install
 
 Requires Go version ≥ `1.21.7`.
@@ -12,9 +25,7 @@ $ go install github.com/pietv/banan@latest
 
 ## Execution
 
-**Banan** ([basque](https://translate.google.com/?sl=eu&tl=en&text=banan&op=translate):
-*"one by one"*, *"separately"*) executes the command
-right away or waits for another instance of that
+**Banan** executes the command right away or waits for another instance of that
 command to complete (if that command has been run using **banan**).
 The command is identified by the name of the executable (for example:
 for a command line `bash -c echo 123` the identification name is `bash`).

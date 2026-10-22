@@ -1,3 +1,19 @@
+// Banan is a simple job queuer that runs a given shell command strictly in
+// sequence, one instance at a time. A command is identified by the name of its
+// binary (arguments are ignored), so all runs of the same-named command
+// run through this tool are serialized through a shared log file. Different
+// commands with same name may be used simultaneously if banan is invoked
+// with a different "--log-dir" directory.
+//
+// For file locking it uses the Go's own [cmd/go/internal/lockedfile]
+// package, which uses OS level file locking (flock on Unix, LockFileEx
+// on Windows) to guarantee that only one process reads and writes the log
+// at a time.
+//
+// It was originally written to queue build jobs arriving at a build server
+// over SSH at random times. Each job cloned a GitHub repository,
+// pulled upstream dependencies, and ran configuration tweaks: a sequence
+// that is unsuitable to be run in parallel.
 package main
 
 import (
