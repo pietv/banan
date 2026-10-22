@@ -28,7 +28,7 @@ var (
 )
 
 const (
-	timestamp = "2006-01-02 15:04:05 MST"
+	timestamp = "2006-Jan-02 15:04:05 MST"
 
 	defaultTimeout               = 30 * time.Minute
 	defaultRelevanceTimeout      = 4 * time.Hour

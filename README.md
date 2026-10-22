@@ -38,12 +38,12 @@ $ cat bash.log
 ```
 
 ```json
-{"time":"2024-04-09 12:12:56 UTC","state":"Processing","pid":45772}
-{"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45772,"wall_clock_time":"2.00s"}
-{"time":"2024-04-09 12:12:56 UTC","state":"Processing","pid":45781}
-{"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45781,"wall_clock_time":"2.00s"}
-{"time":"2024-04-09 12:12:56 UTC","state":"Processing","pid":45790}
-{"time":"2024-04-09 12:12:56 UTC","state":"Done","pid":45790,"wall_clock_time":"2.00s"}
+{"time":"2024-Apr-09 12:12:56 UTC","state":"Processing","pid":45772}
+{"time":"2024-Apr-09 12:12:56 UTC","state":"Done","pid":45772,"wall_clock_time":"2.00s"}
+{"time":"2024-Apr-09 12:12:56 UTC","state":"Processing","pid":45781}
+{"time":"2024-Apr-09 12:12:56 UTC","state":"Done","pid":45781,"wall_clock_time":"2.00s"}
+{"time":"2024-Apr-09 12:12:56 UTC","state":"Processing","pid":45790}
+{"time":"2024-Apr-09 12:12:56 UTC","state":"Done","pid":45790,"wall_clock_time":"2.00s"}
 ```
 
 ```bash
