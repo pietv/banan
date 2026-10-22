@@ -1,6 +1,19 @@
-# Banan: a simple queued job runner
+# Banan: a simple job queuer
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/pietv/banan.svg)](https://pkg.go.dev/github.com/pietv/banan)
+
+**Banan** ([Basque](https://translate.google.com/?sl=eu&tl=en&text=banan&op=translate): *"one by one"*, *"separately"*)
+is a simple job queuer that runs a given shell command strictly in
+sequence, one instance at a time. A command is identified by the name of its
+binary (arguments are ignored), so all runs of the same-named command
+run through this tool are serialized through a shared log file. Commands
+with the same name may run simultaneously if `banan` is invoked with
+different `--log-dir` directories.
+
+It was originally written to queue build jobs arriving at a build server
+over SSH at random times. Each job cloned a GitHub repository,
+pulled upstream dependencies, and ran configuration tweaks: a sequence
+that is unsuitable to be run in parallel.
 
 ## Install
 
@@ -12,9 +25,7 @@ $ go install github.com/pietv/banan@latest
 
 ## Execution
 
-**Banan** ([basque](https://translate.google.com/?sl=eu&tl=en&text=banan&op=translate):
-*"one by one"*, *"separately"*) executes the command
-right away or waits for another instance of that
+**Banan** executes the command right away or waits for another instance of that
 command to complete (if that command has been run using **banan**).
 The command is identified by the name of the executable (for example:
 for a command line `bash -c echo 123` the identification name is `bash`).
@@ -65,7 +76,7 @@ Usage: banan [FLAGS...] COMMAND
 
 ## Example
 
-A real life example of running an Android build on a ad-hoc builder server:
+A real-life example of running an Android build on an ad-hoc builder server:
 
 ```bash
 $ banan -e BUNDLE_ID=$BUNDLE_ID \
@@ -84,7 +95,7 @@ $ banan -e BUNDLE_ID=$BUNDLE_ID \
 ## State diagram
 
 `banan` records the states it goes through in a finite state machine
-(`fsm.New(...)`) with allowed states set in `New()` in `banan.go`.
+(`fsm.New(...)`) with allowed transitions set in `New()` in `banan.go`.
 The `banan` test cases check against the allowed transitions.
 
 ```mermaid
@@ -160,7 +171,7 @@ s8 --> s16
 s9 --> s18
 ```
 
-The states meanings:
+The meaning of the states:
 
 * **Start**, **Wait**: a new pass over the log starts either at the very beginning
   or after waiting for the next check.
@@ -172,7 +183,7 @@ The states meanings:
 * **Find Killed**, **Find Alive**: the process being waited upon has been checked
   and is found not running anymore (**Mark Killed**) or still running.
 * **Find Queue Empty**, **Run Command**, **Take Turn**: it is time to proceed
-  because nothing is waiting, because it is either this instance's turn, or because the
+  because nothing is waiting, because it is not yet this instance's turn, or because the
   instance whose turn it was has not picked up in time (`--queued-pickup`).
   **Mark Processing** records that and the command runs.
 * **Yield Turn**, **Keep Waiting**, **Join Queue**: it is still not this instance's
